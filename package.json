@@ -1,0 +1,16 @@
+{
+  "name": "tl-tournament",
+  "version": "1.0.0",
+  "description": "TL Sales Contest 2025 — multi-zone tournament app",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
