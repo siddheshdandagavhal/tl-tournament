@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TL Sales Contest June'2026</title>
+<title>TL Sales Contest June'26</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet"/>
 <style>
 :root {
@@ -251,6 +251,7 @@ body::before {
   outline: none; width: 100%; margin-bottom: 12px;
 }
 .pw-input:focus, .zone-select:focus { border-color: var(--gold); }
+.zone-select option { background: #1a1a2e; color: #e8e8f0; }
 .admin-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .admin-row .zone-select { margin-bottom: 0; flex: 1; }
 .admin-action-btn {
@@ -286,7 +287,7 @@ body::before {
 
 <header class="header">
   <div class="header-inner">
-    <div class="logo">TL <span>Sales Contest</span> 2025</div>
+    <div class="logo">TL <span>Sales Contest</span> June'26</div>
     <button class="admin-btn" onclick="openAdmin()">⚙ Admin</button>
   </div>
 </header>
@@ -342,7 +343,10 @@ body::before {
           <option value="hvm">HVM Thane</option>
           <option value="west">West &amp; East</option>
         </select>
-        <button class="admin-action-btn danger" onclick="resetZone()">Reset Zone</button>
+      </div>
+      <div class="admin-row" style="gap:6px">
+        <button class="admin-action-btn" style="flex:1;font-size:12px" onclick="adminResetRound()">🔄 Reset Current Round</button>
+        <button class="admin-action-btn danger" style="flex:1;font-size:12px" onclick="resetZone()">⚠ Reset Whole Zone</button>
       </div>
       <button class="admin-action-btn danger" style="width:100%;margin-top:6px" onclick="resetAll()">⚠ Reset ALL Zones</button>
     </div>
@@ -428,10 +432,14 @@ function renderZone(zone) {
     </div>`;
   } else if (allPaired) {
     const lastRound = round >= z.totalRounds;
+    const nextRoundBtn = lastRound ? '' : `<button class="spin-wheel-btn" onclick="onScreenAdvance('${zone}')" style="margin-top:18px">⏭ ADVANCE TO ROUND ${round + 1}</button>`;
+    const resetRoundBtn = `<button onclick="onScreenResetRound('${zone}')" style="display:inline-block;background:transparent;border:1px solid #ff4d4f;color:#ff4d4f;padding:8px 18px;border-radius:8px;font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;margin-top:10px">🔄 Reset This Round</button>`;
     interactiveHTML = `<div class="complete-card">
       <div class="complete-icon">${lastRound ? '🏆' : '✅'}</div>
       <div class="complete-text">${lastRound ? 'FINAL ROUND DRAW COMPLETE!' : `Round ${round} Draw Complete`}</div>
-      <div class="complete-sub">${lastRound ? 'All 12 rounds drawn.' : 'Waiting for admin to start the next round.'}</div>
+      <div class="complete-sub">${lastRound ? 'All 12 rounds drawn.' : 'Click below to advance to the next round.'}</div>
+      ${nextRoundBtn}
+      <div>${resetRoundBtn}</div>
     </div>`;
   } else if (z.currentSpinner) {
     interactiveHTML = `<div class="upnext-card">
@@ -590,24 +598,30 @@ async function pullSlot(zone) {
 }
 
 // ── WHEEL ──
-async function openWheel(zone) {
-  await fetchState();
-  const z = appState[zone];
-  if (!z.currentSpinner) { showToast('No spinner selected'); return; }
-  const spinner = z.currentSpinner;
-  const meta = ZONE_META[zone];
+let wheelOpening = {}; // zone → bool, prevents double-clicks
 
-  // Call server to get the result + candidates
-  let resp;
-  try {
-    resp = await api('/api/spin-wheel', { zone, spinner });
-  } catch (e) {
-    showToast('⚠ ' + e.message);
+async function openWheel(zone) {
+  if (wheelOpening[zone]) return; // already in progress
+  wheelOpening[zone] = true;
+
+  // Disable the spin button instantly so the user gets feedback
+  document.querySelectorAll(`#panel-${zone} .spin-wheel-btn`).forEach(b => {
+    b.disabled = true;
+    b.style.opacity = 0.5;
+    b.textContent = '⏳ LOADING WHEEL…';
+  });
+
+  // Read spinner from current state (already in memory — no need to fetch)
+  if (!appState || !appState[zone] || !appState[zone].currentSpinner) {
+    showToast('No spinner selected');
+    wheelOpening[zone] = false;
+    await fetchState();
     return;
   }
-  const { winner, candidates, willBeRepeat } = resp;
+  const spinner = appState[zone].currentSpinner;
+  const meta = ZONE_META[zone];
 
-  // Build the wheel modal with the actual candidates returned
+  // Build & show the modal IMMEDIATELY with a loading state — user gets instant feedback
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay open';
   overlay.id = 'wheelOverlay';
@@ -615,12 +629,13 @@ async function openWheel(zone) {
     <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:20px;padding:32px;max-width:540px;width:92%;text-align:center;position:relative">
       <button class="modal-close" onclick="closeWheel()">✕</button>
       <div style="font-family:'Bebas Neue',cursive;font-size:30px;letter-spacing:2px;color:${meta.accent};margin-bottom:4px">${spinner}</div>
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:24px">Spinning to reveal your opponent…</div>
+      <div id="wheelStatus" style="font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:24px">Preparing wheel…</div>
       <div class="wheel-container">
         <div class="wheel-pointer"></div>
         <svg class="wheel-svg" viewBox="0 0 360 360">
           <g class="wheel-rotor" id="wheelRotor">
-            ${buildWheelSegments(candidates, meta.accent)}
+            <circle cx="180" cy="180" r="170" fill="rgba(255,255,255,0.05)" stroke="${meta.accent}" stroke-width="4"/>
+            <text x="180" y="180" fill="${meta.accent}" font-family="Bebas Neue" font-size="20" text-anchor="middle" dominant-baseline="middle">LOADING…</text>
           </g>
         </svg>
         <div class="wheel-center">SPIN</div>
@@ -630,9 +645,33 @@ async function openWheel(zone) {
     </div>
   `;
   document.body.appendChild(overlay);
-  wheelState = { zone, spinner, winner, candidates, willBeRepeat, meta };
 
+  // Now make the API call
+  let resp;
+  try {
+    resp = await api('/api/spin-wheel', { zone, spinner });
+  } catch (e) {
+    document.getElementById('wheelStatus').textContent = '⚠ ' + e.message;
+    showToast('⚠ ' + e.message);
+    wheelOpening[zone] = false;
+    setTimeout(() => { closeWheel(); fetchState(); }, 2000);
+    return;
+  }
+  const { winner, candidates, willBeRepeat } = resp;
+  wheelState = { zone, spinner, winner, candidates, willBeRepeat, meta };
   pauseSyncFor[zone] = Date.now() + 6000;
+
+  // Update status text
+  const statusEl = document.getElementById('wheelStatus');
+  if (statusEl) statusEl.textContent = 'Spinning to reveal your opponent…';
+
+  // Render the real wheel segments
+  const rotor = document.getElementById('wheelRotor');
+  if (rotor) {
+    rotor.innerHTML = buildWheelSegments(candidates, meta.accent);
+    rotor.style.transition = 'none';
+    rotor.style.transform = 'rotate(0deg)';
+  }
 
   // Animate
   const winnerIdx = candidates.indexOf(winner);
@@ -642,8 +681,11 @@ async function openWheel(zone) {
   const fullSpins = 5;
   const finalRotation = fullSpins * 360 + baseRotation;
   await new Promise(r => requestAnimationFrame(r));
-  const rotor = document.getElementById('wheelRotor');
-  rotor.style.transform = `rotate(${finalRotation}deg)`;
+  await new Promise(r => requestAnimationFrame(r)); // double rAF ensures the reset above lands
+  if (rotor) {
+    rotor.style.transition = 'transform 4.5s cubic-bezier(0.17, 0.67, 0.21, 0.98)';
+    rotor.style.transform = `rotate(${finalRotation}deg)`;
+  }
 
   await new Promise(r => setTimeout(r, 4700));
 
@@ -664,6 +706,7 @@ async function openWheel(zone) {
   }
   showToast(`${spinner} ⚔ ${winner}${willBeRepeat ? ' (repeat)' : ''}`);
   pauseSyncFor[zone] = 0;
+  wheelOpening[zone] = false;
   await fetchState();
 }
 
@@ -718,14 +761,55 @@ function closeWheel() {
 function openAdmin() { document.getElementById('adminModal').classList.add('open'); }
 function closeAdmin() { document.getElementById('adminModal').classList.remove('open'); }
 
+// Cache admin password in sessionStorage so on-screen Advance / Reset Round buttons work
+function getCachedPw() { return sessionStorage.getItem('tl_admin_pw') || ''; }
+function setCachedPw(pw) { sessionStorage.setItem('tl_admin_pw', pw); }
+function clearCachedPw() { sessionStorage.removeItem('tl_admin_pw'); }
+
 async function adminCall(path, extra) {
   const pw = document.getElementById('adminPw').value;
   try {
-    return await api(path, Object.assign({ password: pw }, extra));
+    const r = await api(path, Object.assign({ password: pw }, extra));
+    if (pw) setCachedPw(pw); // remember on success
+    return r;
   } catch (e) {
+    if (e.message && e.message.toLowerCase().includes('password')) clearCachedPw();
     showToast('⚠ ' + e.message);
     throw e;
   }
+}
+
+// For on-screen admin actions (advance / reset-round) — uses cached pw or prompts
+async function onScreenAdminCall(path, extra, reason) {
+  let pw = getCachedPw();
+  if (!pw) {
+    pw = prompt(reason || 'Admin password:');
+    if (!pw) return null;
+  }
+  try {
+    const r = await api(path, Object.assign({ password: pw }, extra));
+    setCachedPw(pw);
+    return r;
+  } catch (e) {
+    if (e.message && e.message.toLowerCase().includes('password')) {
+      clearCachedPw();
+      showToast('⚠ Wrong password');
+    } else {
+      showToast('⚠ ' + e.message);
+    }
+    return null;
+  }
+}
+
+async function onScreenAdvance(zone) {
+  const r = await onScreenAdminCall('/api/admin/advance-round', { zone }, 'Admin password to advance the round:');
+  if (r) { await fetchState(); showToast(`⏭ ${ZONE_META[zone].name} advanced to Round ${r.round}`); }
+}
+
+async function onScreenResetRound(zone) {
+  if (!confirm(`Reset ALL pairings in the current round for ${ZONE_META[zone].name}? Past rounds stay intact.`)) return;
+  const r = await onScreenAdminCall('/api/admin/reset-round', { zone }, 'Admin password to reset this round:');
+  if (r) { await fetchState(); showToast(`🔄 ${ZONE_META[zone].name} Round ${r.round} reset — click ▶ Start Round to redo it`); }
 }
 
 async function startRound() {
@@ -762,6 +846,16 @@ async function resetZone() {
     await adminCall('/api/admin/reset-zone', { zone });
     await fetchState();
     showToast(`${ZONE_META[zone].name} reset!`);
+  } catch (e) {}
+}
+
+async function adminResetRound() {
+  const zone = document.getElementById('resetZone').value;
+  if (!confirm(`Reset ALL pairings in the current round for ${ZONE_META[zone].name}? Past rounds stay intact.`)) return;
+  try {
+    const r = await adminCall('/api/admin/reset-round', { zone });
+    await fetchState();
+    showToast(`🔄 ${ZONE_META[zone].name} Round ${r.round} reset — click ▶ Start Round to redo it`);
   } catch (e) {}
 }
 
