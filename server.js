@@ -254,6 +254,43 @@ app.post('/api/admin/reset-zone', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Reset just the current round (or any specific round) — wipes that round's pairings
+// and rebuilds opponentHistory from the surviving rounds.
+app.post('/api/admin/reset-round', async (req, res) => {
+  if (!isAdmin(req)) return res.status(403).json({ error: 'Wrong password' });
+  try {
+    const { zone, round } = req.body;
+    if (!ZONES[zone]) return res.status(400).json({ error: 'Invalid zone' });
+    const state = await loadState();
+    const z = state[zone];
+    const r = round || z.currentRound;
+
+    delete z.pairings[r];
+    delete z.pairRepeats[r];
+
+    // Rebuild opponentHistory from remaining rounds
+    const oh = {};
+    z.tls.forEach(t => oh[t] = []);
+    for (const [rNum, pairs] of Object.entries(z.pairings)) {
+      for (const pair of (pairs || [])) {
+        const [a, b] = pair;
+        if (oh[a]) oh[a].push(b);
+        if (oh[b]) oh[b].push(a);
+      }
+    }
+    z.opponentHistory = oh;
+
+    // If we reset the current round, deactivate so admin needs to start it again
+    if (r === z.currentRound) {
+      z.roundActive = false;
+      z.currentSpinner = null;
+    }
+
+    await saveState(state);
+    res.json({ success: true, round: r });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/admin/reset-all', async (req, res) => {
   if (!isAdmin(req)) return res.status(403).json({ error: 'Wrong password' });
   try {
