@@ -381,11 +381,30 @@ async function api(path, body) {
   return data;
 }
 
+let lastStateHash = '';
+
+// Builds a deterministic JSON string that ignores object key order — needed because
+// Supabase JSONB doesn't preserve key order, so each fetch may return the same data
+// with keys in a different order, falsely looking "changed".
+function stableStringify(obj) {
+  const allKeys = new Set();
+  JSON.stringify(obj, (k, v) => { allKeys.add(k); return v; });
+  return JSON.stringify(obj, Array.from(allKeys).sort());
+}
+
+// Pause polling for debugging — type pausePolling() in DevTools console
+window.pausePolling = function () { clearInterval(pollInterval); console.log('Polling paused. Run resumePolling() to restart.'); };
+window.resumePolling = function () { pollInterval = setInterval(fetchState, 3000); console.log('Polling resumed.'); };
+
 async function fetchState() {
   try {
-    appState = await api('/api/state');
+    const newState = await api('/api/state');
     document.getElementById('connStatus').textContent = '● Connected';
     document.getElementById('connStatus').classList.remove('error');
+    const newHash = stableStringify(newState);
+    if (newHash === lastStateHash) return;
+    lastStateHash = newHash;
+    appState = newState;
     renderAll();
   } catch (e) {
     document.getElementById('connStatus').textContent = '● Disconnected';
